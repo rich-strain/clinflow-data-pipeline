@@ -32,7 +32,7 @@ sys.path.insert(0, ROOT)
 
 from data.generate_dataset import generate
 from pipeline.cleaner       import clean, impute
-from pipeline.features      import build_features
+from pipeline.features      import build_features, derive_bmi
 from model.trainer          import train_and_evaluate
 
 # ── Colorblind-friendly palette ───────────────────────────────────
@@ -95,6 +95,7 @@ if run_btn:
     with st.spinner("Cleaning and normalising data…"):
         cleaned_df = clean(raw_df)
         cleaned_df = impute(cleaned_df)
+        cleaned_df = derive_bmi(cleaned_df)
         st.session_state.clean_df = cleaned_df
 
     with st.spinner("Engineering features and training model…"):
@@ -132,7 +133,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 # ═══════════════════════════════════════════════════════════════════
 with tab1:
     st.subheader("Raw (Messy) Patient Records")
-    st.dataframe(raw_df.head(20), use_container_width=True)
+    st.dataframe(raw_df, use_container_width=True)
 
     st.subheader("After Cleaning & Normalisation")
     display_cols = [
@@ -140,7 +141,7 @@ with tab1:
         "temperature", "blood_pressure", "heart_rate", "glucose", "spo2", "diagnosis"
     ]
     display_cols = [c for c in display_cols if c in clean_df.columns]
-    st.dataframe(clean_df[display_cols].head(20).round(2), use_container_width=True)
+    st.dataframe(clean_df[display_cols].round(2), use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════════════
 # TAB 2 — Data Quality

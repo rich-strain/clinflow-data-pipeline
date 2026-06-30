@@ -132,20 +132,10 @@ tab1, tab2, tab3, tab4 = st.tabs([
 # TAB 1 — Data Preview
 # ═══════════════════════════════════════════════════════════════════
 with tab1:
-    PAGE_SIZE = 20
-    total_pages = max(1, -(-len(raw_df) // PAGE_SIZE))  # ceiling division
-
-    pcol1, pcol2, pcol3 = st.columns([1, 2, 1])
-    with pcol2:
-        page = st.number_input(
-            f"Page (1 – {total_pages})",
-            min_value=1, max_value=total_pages, value=1, step=1,
-        )
-    start = (page - 1) * PAGE_SIZE
-    end   = start + PAGE_SIZE
+    n_preview = st.slider("Rows to preview", min_value=10, max_value=min(200, len(raw_df)), value=20, step=10)
 
     st.subheader("Raw (Messy) Patient Records")
-    st.dataframe(raw_df.iloc[start:end], use_container_width=True)
+    st.dataframe(raw_df.head(n_preview), use_container_width=True)
 
     st.subheader("After Cleaning & Normalisation")
     display_cols = [
@@ -153,7 +143,7 @@ with tab1:
         "temperature", "blood_pressure", "heart_rate", "glucose", "spo2", "diagnosis"
     ]
     display_cols = [c for c in display_cols if c in clean_df.columns]
-    st.dataframe(clean_df[display_cols].iloc[start:end].round(2), use_container_width=True)
+    st.dataframe(clean_df[display_cols].head(n_preview).round(2), use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════════════
 # TAB 2 — Data Quality

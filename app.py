@@ -277,6 +277,45 @@ with tab3:
         )
         st.plotly_chart(fig_roc, use_container_width=True)
 
+    # ── Normalized confusion matrix ───────────────────────────────
+    st.subheader("Confusion Matrix — Normalised (Row = Recall per Class)")
+    cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
+    fig_cm_norm = px.imshow(
+        cm_norm,
+        labels=dict(x="Predicted", y="Actual", color="Recall"),
+        x=labels,
+        y=labels,
+        text_auto=".0%",
+        color_continuous_scale=[[0, "#EBF4FB"], [1, PALETTE["primary"]]],
+        zmin=0, zmax=1,
+        title="Row-Normalised Confusion Matrix (each row sums to 100%)",
+    )
+    fig_cm_norm.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    st.plotly_chart(fig_cm_norm, use_container_width=True)
+
+    # ── Training set class balance ────────────────────────────────
+    st.subheader("Class Balance — Training Set")
+    y_train_series = pd.Series(results["y_train"])
+    label_map = {i: name for i, name in enumerate(results["class_names"])}
+    train_counts = y_train_series.map(label_map).value_counts().sort_index()
+    fig_balance = go.Figure(go.Bar(
+        x=train_counts.index,
+        y=train_counts.values,
+        marker_color=PALETTE["classes"],
+        text=train_counts.values,
+        textposition="outside",
+    ))
+    fig_balance.update_layout(
+        yaxis_title="Training samples",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+    )
+    st.plotly_chart(fig_balance, use_container_width=True)
+
     # ── Cross-validation scores ───────────────────────────────────
     st.subheader("Cross-Validation Accuracy (5 Folds)")
     cv_df = pd.DataFrame({
@@ -371,3 +410,135 @@ with tab4:
         yaxis_title=selected_feature,
     )
     st.plotly_chart(fig_box, use_container_width=True)
+
+    # ── Class feature profile heatmap ─────────────────────────────
+    st.subheader("Class Feature Profiles (Z-Scored Means)")
+    st.markdown(
+        "Each cell shows how far above/below the global mean a class sits for that feature. "
+        "A class with **no distinctive pattern** (all cells near zero) will be hard to separate."
+    )
+
+    numeric_features = [c for c in feature_names if c in clean_df.columns]
+    profile_df = clean_df.groupby("diagnosis")[numeric_features].mean()
+    profile_z  = (profile_df - profile_df.mean()) / profile_df.std()
+    profile_z  = profile_z.reindex(sorted(profile_z.index))
+
+    fig_profile = px.imshow(
+        profile_z,
+        labels=dict(x="Feature", y="Diagnosis", color="Z-score"),
+        color_continuous_scale="RdBu_r",
+        color_continuous_midpoint=0,
+        text_auto=".2f",
+        title="Z-Scored Feature Means by Class — classes with weak signal cluster near 0",
+        aspect="auto",
+    )
+    fig_profile.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        height=320,
+    )
+    st.plotly_chart(fig_profile, use_container_width=True)
+
+    # ── ANOVA F-statistic per feature for Neurological ────────────
+    st.subheader("Feature Discriminability — ANOVA F-Statistic")
+    st.markdown(
+        "Higher F means a feature separates classes well. "
+        "Low F for every feature confirms the signal problem is in the **data**, not the model."
+    )
+
+    from scipy.stats import f_oneway
+
+    f_rows = []
+    for feat in numeric_features:
+        groups = [
+            clean_df.loc[clean_df["diagnosis"] == cls, feat].dropna().values
+            for cls in clean_df["diagnosis"].unique()
+        ]
+        groups = [g for g in groups if len(g) > 1]
+        if len(groups) >= 2:
+            f_stat, p_val = f_oneway(*groups)
+            f_rows.append({"Feature": feat, "F-statistic": round(f_stat, 2), "p-value": round(p_val, 4)})
+
+    f_df = pd.DataFrame(f_rows).sort_values("F-statistic", ascending=True)
+
+    fig_f = go.Figure(go.Bar(
+        x=f_df["F-statistic"],
+        y=f_df["Feature"],
+        orientation="h",
+        marker_color=[
+            PALETTE["coral"] if v < 20 else PALETTE["teal"]
+            for v in f_df["F-statistic"]
+        ],
+        text=[f"F={v:.1f}" for v in f_df["F-statistic"]],
+        textposition="outside",
+    ))
+    fig_f.update_layout(
+        title="ANOVA F-Statistic per Feature (red = weak separation across all 5 classes)",
+        xaxis_title="F-statistic",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        height=380,
+    )
+    st.plotly_chart(fig_f, use_container_width=True)
+
+    # ── Per-class model weights / importances ─────────────────────
+    st.subheader("Per-Class Model Weights")
+    model = results["model"]
+
+    if hasattr(model, "coef_"):
+        # Logistic Regression: coef_ shape (n_classes, n_features)
+        coef_df = pd.DataFrame(
+            model.coef_,
+            index=results["class_names"],
+            columns=feature_names,
+        )
+        fig_coef = px.imshow(
+            coef_df,
+            labels=dict(x="Feature", y="Class", color="Coefficient"),
+            color_continuous_scale="RdBu_r",
+            color_continuous_midpoint=0,
+            text_auto=".2f",
+            title="Logistic Regression Coefficients per Class — large |values| = strong signal",
+            aspect="auto",
+        )
+        fig_coef.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            height=320,
+        )
+        st.plotly_chart(fig_coef, use_container_width=True)
+        st.caption(
+            "Neurological row near-zero across all features → model has no discriminating coefficients to assign."
+        )
+    else:
+        # Random Forest: show mean predicted probability per true class (calibration heatmap)
+        st.markdown("**Mean predicted class probabilities for each true class (Random Forest)**")
+        y_test   = results["y_test"]
+        y_proba  = results["y_proba"]
+        classes  = results["class_names"]
+        prob_rows = []
+        for i, cls in enumerate(classes):
+            mask = (y_test == i)
+            if mask.sum() > 0:
+                mean_probs = y_proba[mask].mean(axis=0)
+                prob_rows.append(dict(zip(["True Class"] + classes, [cls] + list(mean_probs))))
+        prob_df = pd.DataFrame(prob_rows).set_index("True Class")
+
+        fig_prob = px.imshow(
+            prob_df.astype(float),
+            labels=dict(x="Predicted Class", y="True Class", color="Mean P"),
+            color_continuous_scale=[[0, "#EBF4FB"], [1, PALETTE["primary"]]],
+            text_auto=".2f",
+            zmin=0, zmax=1,
+            title="Mean RF Predicted Probabilities by True Class — diagonal = confidence; off-diagonal = confusion",
+            aspect="auto",
+        )
+        fig_prob.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            height=320,
+        )
+        st.plotly_chart(fig_prob, use_container_width=True)
+        st.caption(
+            "Low diagonal probability for Neurological row = model is uncertain about every Neurological case."
+        )

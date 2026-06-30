@@ -26,11 +26,11 @@ DIAGNOSES = {
 
 # ── Typical vital ranges per diagnosis ────────────────────────────
 DIAGNOSIS_PROFILES = {
-    "Cardiovascular":  {"sbp": (140, 20), "hr": (88, 15),  "bmi": (28, 4),  "glucose": (105, 15), "spo2": (96, 2)},
-    "Respiratory":     {"sbp": (118, 12), "hr": (95, 18),  "bmi": (24, 4),  "glucose": (98,  12), "spo2": (91, 4)},
-    "Metabolic":       {"sbp": (130, 15), "hr": (80, 12),  "bmi": (34, 5),  "glucose": (180, 40), "spo2": (97, 1)},
-    "Musculoskeletal": {"sbp": (120, 10), "hr": (75, 10),  "bmi": (27, 5),  "glucose": (95,  10), "spo2": (98, 1)},
-    "Neurological":    {"sbp": (125, 18), "hr": (82, 14),  "bmi": (25, 4),  "glucose": (100, 15), "spo2": (97, 2)},
+    "Cardiovascular":  {"sbp": (148, 16), "hr": (88, 12),  "bmi": (29, 4),  "glucose": (108, 14), "spo2": (96, 2)},
+    "Respiratory":     {"sbp": (112, 10), "hr": (98, 14),  "bmi": (24, 4),  "glucose": (96,  10), "spo2": (89, 3)},
+    "Metabolic":       {"sbp": (132, 12), "hr": (80, 10),  "bmi": (36, 4),  "glucose": (190, 35), "spo2": (97, 1)},
+    "Musculoskeletal": {"sbp": (118, 8),  "hr": (70, 8),   "bmi": (28, 4),  "glucose": (92,  8),  "spo2": (99, 1)},
+    "Neurological":    {"sbp": (108, 12), "hr": (88, 10),  "bmi": (24, 4),  "glucose": (100, 12), "spo2": (95, 2)},
 }
 
 # ── Messy format helpers ───────────────────────────────────────────
@@ -126,7 +126,8 @@ def generate_patient(patient_id: int) -> dict:
     age        = random.randint(25, 80)
     height_cm  = np.random.normal(170 if gender == "Male" else 162, 8)
     weight_kg  = np.random.normal(82 if gender == "Male" else 68, 14)
-    temp_c     = np.random.normal(37.0, 0.4)
+    # Neurological patients commonly present febrile (encephalitis/meningitis/stroke)
+    temp_c = np.random.normal(38.3 if diagnosis == "Neurological" else 37.0, 0.35)
 
     sbp     = max(80,  int(np.random.normal(*profile["sbp"])))
     hr      = max(40,  int(np.random.normal(*profile["hr"])))

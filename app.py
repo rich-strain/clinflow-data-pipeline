@@ -58,7 +58,7 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🏥 ClinFlow Clinical Data Pipeline")
+st.title("🏥 Clinical Data Pipeline")
 st.markdown(
     "A demonstration of **messy EHR data → cleaning pipeline → ML model training → performance analysis**."
 )

@@ -22,9 +22,11 @@ FEATURE_COLS = [
     "gender",
     "height",
     "weight",
-    "bmi",           # derived
+    "bmi",             # derived
     "temperature",
-    "blood_pressure",
+    "systolic_bp",
+    "diastolic_bp",
+    "pulse_pressure",  # derived (systolic − diastolic)
     "heart_rate",
     "glucose",
     "spo2",
@@ -40,6 +42,13 @@ def derive_bmi(df: pd.DataFrame) -> pd.DataFrame:
     df["bmi"] = df["weight"] / (height_m ** 2)
     # Clip to a clinically plausible range
     df["bmi"] = df["bmi"].clip(10, 70)
+    return df
+
+
+def derive_pulse_pressure(df: pd.DataFrame) -> pd.DataFrame:
+    """Pulse pressure = systolic − diastolic (mmHg). Clipped to a plausible range."""
+    df = df.copy()
+    df["pulse_pressure"] = (df["systolic_bp"] - df["diastolic_bp"]).clip(10, 100)
     return df
 
 
@@ -76,6 +85,7 @@ def build_features(
     scaler      : fitted StandardScaler
     """
     df = derive_bmi(df)
+    df = derive_pulse_pressure(df)
 
     # Ensure all feature columns exist
     missing = [c for c in FEATURE_COLS if c not in df.columns]

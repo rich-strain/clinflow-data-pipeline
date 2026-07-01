@@ -9,7 +9,7 @@ All values are converted to a canonical unit:
   height      → cm (float)
   weight      → kg (float)
   temperature → Celsius (float)
-  blood_pressure → systolic mmHg (int)
+  blood_pressure → systolic_bp + diastolic_bp mmHg (float)
   heart_rate  → bpm (int)
   glucose     → mg/dL (float)
   spo2        → percentage 0–100 (float)
@@ -115,31 +115,31 @@ def parse_temperature(val) -> float:
 
 # ── Blood Pressure → systolic mmHg ───────────────────────────────
 
-def parse_blood_pressure(val) -> float:
+def parse_blood_pressure(val) -> tuple:
     """
-    Extract systolic BP in mmHg.
-    Handles: '140/90', 'BP 140 over 90', '140'
+    Extract (systolic, diastolic) BP in mmHg.
+    Handles: '140/90', 'BP 140 over 90', '140' (systolic only → diastolic NaN)
     """
     if pd.isna(val):
-        return np.nan
+        return (np.nan, np.nan)
     s = str(val).strip()
 
     # "140/90" or "140 / 90"
-    slash = re.search(r"(\d+)\s*/\s*\d+", s)
+    slash = re.search(r"(\d+)\s*/\s*(\d+)", s)
     if slash:
-        return float(slash.group(1))
+        return (float(slash.group(1)), float(slash.group(2)))
 
     # "BP 140 over 90" or "140 over 90"
-    over = re.search(r"(\d+)\s+over\s+\d+", s, re.IGNORECASE)
+    over = re.search(r"(\d+)\s+over\s+(\d+)", s, re.IGNORECASE)
     if over:
-        return float(over.group(1))
+        return (float(over.group(1)), float(over.group(2)))
 
-    # bare number
+    # bare number — systolic only, diastolic was never recorded
     bare = re.search(r"(\d+)", s)
     if bare:
-        return float(bare.group(1))
+        return (float(bare.group(1)), np.nan)
 
-    return np.nan
+    return (np.nan, np.nan)
 
 
 # ── Heart Rate → bpm ──────────────────────────────────────────────
@@ -204,17 +204,24 @@ def parse_spo2(val) -> float:
 
 # ── Main cleaner ──────────────────────────────────────────────────
 
+# Scalar parsers applied column-by-column. Blood pressure is handled
+# separately in clean() because it splits one field into two columns.
 PARSERS = {
     "age":            parse_age,
     "gender":         parse_gender,
     "height":         parse_height,
     "weight":         parse_weight,
     "temperature":    parse_temperature,
-    "blood_pressure": parse_blood_pressure,
     "heart_rate":     parse_heart_rate,
     "glucose":        parse_glucose,
     "spo2":           parse_spo2,
 }
+
+# Numeric columns present after clean() — used for median imputation.
+NUMERIC_COLS = [
+    "age", "gender", "height", "weight", "temperature",
+    "systolic_bp", "diastolic_bp", "heart_rate", "glucose", "spo2",
+]
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -229,6 +236,16 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
             cleaned[f"{col}_raw"] = cleaned[col]   # preserve original
             cleaned[col] = cleaned[col].apply(parser)
 
+    # Blood pressure splits one messy field into two numeric columns.
+    # Bare-number records (systolic only) leave diastolic_bp as NaN,
+    # which the imputation step then fills.
+    if "blood_pressure" in cleaned.columns:
+        cleaned["blood_pressure_raw"] = cleaned["blood_pressure"]
+        bp = cleaned["blood_pressure"].apply(parse_blood_pressure)
+        cleaned["systolic_bp"]  = bp.apply(lambda pair: pair[0])
+        cleaned["diastolic_bp"] = bp.apply(lambda pair: pair[1])
+        cleaned = cleaned.drop(columns=["blood_pressure"])
+
     return cleaned
 
 
@@ -237,8 +254,7 @@ def impute(df: pd.DataFrame) -> pd.DataFrame:
     Simple median imputation for remaining NaN values in numeric columns.
     In a production pipeline this would be a more sophisticated strategy.
     """
-    numeric_cols = list(PARSERS.keys())
-    for col in numeric_cols:
+    for col in NUMERIC_COLS:
         if col in df.columns:
             median_val = df[col].median()
             df[col] = df[col].fillna(median_val)

@@ -32,7 +32,7 @@ sys.path.insert(0, ROOT)
 
 from data.generate_dataset import generate
 from pipeline.cleaner       import clean, impute
-from pipeline.features      import build_features, derive_bmi
+from pipeline.features      import build_features, derive_bmi, derive_pulse_pressure
 from model.trainer          import train_and_evaluate
 
 # ── Colorblind-friendly palette ───────────────────────────────────
@@ -62,6 +62,44 @@ st.title("🏥 ClinFlow Clinical Data Pipeline")
 st.markdown(
     "A demonstration of **messy EHR data → cleaning pipeline → ML model training → performance analysis**."
 )
+
+with st.expander("📖 How this pipeline works — project walkthrough", expanded=True):
+    st.markdown(
+        """
+        This project demonstrates a complete **ETL → ML → visualization** workflow on
+        healthcare-style data.
+
+        **1. Generate (synthetic data)**
+        I started by generating synthetic EHR-style records — intentionally messy, with
+        inconsistent formats, mixed units, and missing values — so the data resembles
+        real-world fragmented patient records **without any actual PHI concerns**.
+
+        **2. Extract & Transform (the ETL core)**
+        Regex-based parsers (orchestrated with pandas) clean and normalize that messy data:
+        standardizing formats (e.g. `172/141`, `BP 107 over 75`, and `126` all → systolic
+        mmHg), converting mixed units to a canonical scale (°F→°C, lbs→kg, mmol/L→mg/dL),
+        and imputing missing values.
+
+        **3. Load & Train (the model)**
+        Once the data is clean and structured, I train a classifier to predict diagnosis
+        category (Cardiovascular, Respiratory, Metabolic, …) with scikit-learn. I compare
+        **Logistic Regression** against **Random Forest** — good practice to test whether a
+        more flexible model actually earns its added complexity over a simple, interpretable
+        baseline.
+
+        **4. Evaluate (beyond accuracy)**
+        With multiple categories, accuracy alone is misleading, so I look at **precision and
+        recall per class**. In a healthcare context, missing a real diagnosis is a different
+        kind of mistake than a false alarm — you want to know which one your model is more
+        prone to.
+
+        **5. Visualize (this app)**
+        A Streamlit UI with Plotly charts makes model performance something you can *see*
+        rather than read off a terminal — which also makes the project easier to explain to
+        non-technical stakeholders.
+
+        """
+    )
 
 # ═══════════════════════════════════════════════════════════════════
 # SIDEBAR — controls
@@ -96,6 +134,7 @@ if run_btn:
         cleaned_df = clean(raw_df)
         cleaned_df = impute(cleaned_df)
         cleaned_df = derive_bmi(cleaned_df)
+        cleaned_df = derive_pulse_pressure(cleaned_df)
         st.session_state.clean_df = cleaned_df
 
     with st.spinner("Engineering features and training model…"):
@@ -138,12 +177,21 @@ with tab1:
     st.dataframe(raw_df.head(n_preview), use_container_width=True)
 
     st.subheader("After Cleaning & Normalisation")
+    display_df = clean_df.copy()
+    # Recombine the two numeric BP columns into a readable "systolic/diastolic" string
+    if {"systolic_bp", "diastolic_bp"}.issubset(display_df.columns):
+        display_df["blood_pressure"] = (
+            display_df["systolic_bp"].round().astype("Int64").astype(str)
+            + "/"
+            + display_df["diastolic_bp"].round().astype("Int64").astype(str)
+        )
     display_cols = [
         "patient_id", "age", "gender", "height", "weight", "bmi",
-        "temperature", "blood_pressure", "heart_rate", "glucose", "spo2", "diagnosis"
+        "temperature", "blood_pressure", "pulse_pressure",
+        "heart_rate", "glucose", "spo2", "diagnosis"
     ]
-    display_cols = [c for c in display_cols if c in clean_df.columns]
-    st.dataframe(clean_df[display_cols].head(n_preview).round(2), use_container_width=True)
+    display_cols = [c for c in display_cols if c in display_df.columns]
+    st.dataframe(display_df[display_cols].head(n_preview).round(2), use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════════════
 # TAB 2 — Data Quality
@@ -151,17 +199,24 @@ with tab1:
 with tab2:
     st.subheader("Data Quality Improvements")
 
-    feature_cols = ["age", "gender", "height", "weight",
-                    "temperature", "blood_pressure", "heart_rate", "glucose", "spo2"]
+    # (raw column, cleaned column) pairs — blood_pressure maps to systolic_bp
+    # since the raw messy field is split into two columns during cleaning.
+    col_pairs = [
+        ("age", "age"), ("gender", "gender"), ("height", "height"),
+        ("weight", "weight"), ("temperature", "temperature"),
+        ("blood_pressure", "systolic_bp"), ("heart_rate", "heart_rate"),
+        ("glucose", "glucose"), ("spo2", "spo2"),
+    ]
 
-    # Null counts before and after
-    raw_nulls   = raw_df[feature_cols].isna().sum()
-    clean_nulls = clean_df[feature_cols].isna().sum()
+    # Null counts before and after (aligned on the raw column name)
+    labels      = [raw for raw, _ in col_pairs]
+    raw_nulls   = [raw_df[raw].isna().sum()   for raw, _   in col_pairs]
+    clean_nulls = [clean_df[cln].isna().sum() for _,   cln in col_pairs]
 
-    quality_df = pd.DataFrame({
-        "Raw Nulls":     raw_nulls,
-        "Cleaned Nulls": clean_nulls,
-    })
+    quality_df = pd.DataFrame(
+        {"Raw Nulls": raw_nulls, "Cleaned Nulls": clean_nulls},
+        index=labels,
+    )
 
     col1, col2 = st.columns(2)
 
@@ -205,8 +260,12 @@ with tab2:
 
     # Summary stats comparison
     st.subheader("Cleaned Feature Statistics")
+    stat_cols = ["age", "gender", "height", "weight", "temperature",
+                 "systolic_bp", "diastolic_bp", "pulse_pressure",
+                 "heart_rate", "glucose", "spo2"]
+    stat_cols = [c for c in stat_cols if c in clean_df.columns]
     st.dataframe(
-        clean_df[feature_cols].describe().round(2),
+        clean_df[stat_cols].describe().round(2),
         use_container_width=True,
     )
 
@@ -385,10 +444,13 @@ with tab4:
     st.subheader("Feature Distributions by Diagnosis")
 
     top_feature = importance_df.iloc[-1]["Feature"]  # most important
+    if "selected_feature" not in st.session_state:
+        st.session_state.selected_feature = top_feature
+
     selected_feature = st.selectbox(
         "Select feature to explore",
         options=feature_names,
-        index=feature_names.index(top_feature),
+        key="selected_feature",
     )
 
     plot_df = clean_df[["diagnosis", selected_feature]].dropna()
